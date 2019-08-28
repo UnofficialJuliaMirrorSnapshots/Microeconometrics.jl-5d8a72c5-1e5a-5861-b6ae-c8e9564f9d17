@@ -4,7 +4,7 @@
 
 mutable struct Tan <: TwoStageModel
 
-    first_stage::Micromodel
+    first_stage::OneStageModel
     second_stage::IV
     pscore::Vector{Float64}
     eweights::ProbabilityWeights{Float64, Float64, Vector{Float64}}
@@ -16,11 +16,13 @@ end
 
 # FIRST STAGE
 
-function first_stage(::Type{Tan}, MM::Type{<:Micromodel}, MD::Microdata; kwargs...)
+function first_stage(::Type{Tan}, MM::Type{<:OneStageModel}, MD::Microdata; kwargs...)
 
-    FSM                = Dict(:treatment => "", :instrument => "")
-    FSD                = Microdata(MD, FSM)
-    FSD.map[:response] = MD.map[:instrument]
+    FSD                    = Microdata(MD)
+    FSD.mapping[:response] = MD.mapping[:instrument]
+
+    pop!(FSD.mapping, :treatment)
+    pop!(FSD.mapping, :instrument)
 
     return fit(MM, FSD; kwargs...)
 end
@@ -30,7 +32,7 @@ end
 # ESTIMATION
 
 function fit(
-        ::Type{Tan}, MM::Type{<:Micromodel}, MD::Microdata; novar::Bool = false, kwargs...
+        ::Type{Tan}, MM::Type{<:OneStageModel}, MD::Microdata; novar::Bool = false, kwargs...
     )
 
     m = first_stage(Tan, MM, MD; novar = novar)
@@ -39,7 +41,7 @@ end
 
 function fit(
         ::Type{Tan},
-        MM::Micromodel,
+        MM::OneStageModel,
         MD::Microdata;
         novar::Bool = false,
         trim::AbstractFloat = 0.0,
@@ -53,12 +55,14 @@ function fit(
 
     v[((trim .> π) .| (1.0 - trim .< π))] .= 0.0
 
-    SSD              = Microdata(MD, Dict(:control => "1"))
+    SSD                   = Microdata(MD)
+    SSD.mapping[:control] = asgn(MD.model, InterceptTerm{true}())
+
     obj              = Tan()
     obj.first_stage  = MM
     obj.second_stage = IV(SSD)
     obj.pscore       = π
-    obj.eweights      = pweights(v)
+    obj.eweights     = pweights(v)
 
     _fit!(second_stage(obj), reweight(w, obj.eweights))
     novar || _vcov!(obj, getcorr(obj), w)

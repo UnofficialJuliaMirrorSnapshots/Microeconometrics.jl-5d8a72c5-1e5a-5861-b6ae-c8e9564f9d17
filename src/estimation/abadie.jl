@@ -4,7 +4,7 @@
 
 mutable struct Abadie <: TwoStageModel
 
-    first_stage::Micromodel
+    first_stage::OneStageModel
     second_stage::ParModel
     pscore::Vector{Float64}
     eweights::ProbabilityWeights{Float64, Float64, Vector{Float64}}
@@ -16,11 +16,13 @@ end
 
 # FIRST STAGE
 
-function first_stage(::Type{Abadie}, M₁::Type{<:Micromodel}, MD::Microdata; kwargs...)
+function first_stage(::Type{Abadie}, M₁::Type{<:OneStageModel}, MD::Microdata; kwargs...)
 
-    FSM                = Dict(:treatment => "", :instrument => "")
-    FSD                = Microdata(MD, FSM)
-    FSD.map[:response] = MD.map[:instrument]
+    FSD                    = Microdata(MD)
+    FSD.mapping[:response] = MD.mapping[:instrument]
+
+    pop!(FSD.mapping, :treatment)
+    pop!(FSD.mapping, :instrument)
 
     return fit(M₁, FSD; kwargs...)
 end
@@ -31,7 +33,7 @@ end
 
 function fit(
         ::Type{Abadie},
-        M₂::Type{<:Micromodel},
+        M₂::Type{<:OneStageModel},
         M₁::Type{<:ParModel},
         MD::Microdata;
         novar::Bool = false,
@@ -44,8 +46,8 @@ end
 
 function fit(
         ::Type{Abadie},
-        M₂::Type{<:Micromodel},
-        M₁::Micromodel,
+        M₂::Type{<:OneStageModel},
+        M₁::OneStageModel,
         MD::Microdata;
         novar::Bool = false,
         trim::AbstractFloat = 0.0,
@@ -61,13 +63,14 @@ function fit(
 
     v[((trim .> π) .| (1.0 - trim .< π))] .= 0.0
 
-    SSD               = Microdata(MD, Dict{Symbol,String}())
-    SSD.map[:control] = vcat(SSD.map[:treatment], SSD.map[:control])
-    obj               = Abadie()
-    obj.first_stage   = M₁
-    obj.second_stage  = M₂(SSD; kwargs...)
-    obj.pscore        = π
-    obj.eweights       = pweights(v)
+    SSD                   = Microdata(MD)
+    SSD.mapping[:control] = vcat(MD.mapping[:treatment], MD.mapping[:control])
+
+    obj              = Abadie()
+    obj.first_stage  = M₁
+    obj.second_stage = M₂(SSD; kwargs...)
+    obj.pscore       = π
+    obj.eweights     = pweights(v)
 
     _fit!(second_stage(obj), reweight(w, obj.eweights))
     novar || _vcov!(obj, getcorr(obj), w)

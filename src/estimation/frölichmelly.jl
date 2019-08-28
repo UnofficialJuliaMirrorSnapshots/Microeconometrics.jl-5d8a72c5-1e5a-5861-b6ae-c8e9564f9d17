@@ -4,7 +4,7 @@
 
 mutable struct FrölichMelly <: TwoStageModel
 
-    first_stage::Micromodel
+    first_stage::OneStageModel
     second_stage::OLS
     pscore::Vector{Float64}
     eweights::ProbabilityWeights{Float64, Float64, Vector{Float64}}
@@ -16,11 +16,13 @@ end
 
 # FIRST STAGE
 
-function first_stage(::Type{FrölichMelly}, MM::Type{<:Micromodel}, MD::Microdata; kwargs...)
+function first_stage(::Type{FrölichMelly}, MM::Type{<:OneStageModel}, MD::Microdata; kwargs...)
 
-    FSM                = Dict(:treatment => "", :instrument => "")
-    FSD                = Microdata(MD, FSM)
-    FSD.map[:response] = MD.map[:instrument]
+    FSD                    = Microdata(MD)
+    FSD.mapping[:response] = MD.mapping[:instrument]
+
+    pop!(FSD.mapping, :treatment)
+    pop!(FSD.mapping, :instrument)
 
     return fit(MM, FSD; kwargs...)
 end
@@ -31,7 +33,7 @@ end
 
 function fit(
         ::Type{FrölichMelly},
-        MM::Type{<:Micromodel},
+        MM::Type{<:OneStageModel},
         MD::Microdata;
         novar::Bool = false,
         kwargs...
@@ -43,7 +45,7 @@ end
 
 function fit(
         ::Type{FrölichMelly},
-        MM::Micromodel,
+        MM::OneStageModel,
         MD::Microdata;
         novar::Bool = false,
         trim::AbstractFloat = 0.0,
@@ -57,13 +59,14 @@ function fit(
 
     v[((trim .> π) .| (1.0 - trim .< π))] .= 0.0
 
-    SSD               = Microdata(MD, Dict{Symbol,String}())
-    SSD.map[:control] = vcat(SSD.map[:treatment], 1)
-    obj               = FrölichMelly()
-    obj.first_stage   = MM
-    obj.second_stage  = OLS(SSD)
-    obj.pscore        = π
-    obj.eweights       = pweights(v)
+    SSD                   = Microdata(MD)
+    SSD.mapping[:control] = asgn(MD.model, (MD.mapping[:treatment], InterceptTerm{true}()))
+
+    obj              = FrölichMelly()
+    obj.first_stage  = MM
+    obj.second_stage = OLS(SSD)
+    obj.pscore       = π
+    obj.eweights     = pweights(v)
 
     _fit!(second_stage(obj), reweight(w, obj.eweights))
     novar || _vcov!(obj, getcorr(obj), w)
